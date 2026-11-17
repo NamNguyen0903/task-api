@@ -5,7 +5,7 @@ import os
 
 
 def hash_password(password: str, salt: bytes) -> bytes:
-    """Create a PBKDF2-HMAC-SHA256 password hash."""
+    """Hash password using PBKDF2-HMAC-SHA256."""
     return hashlib.pbkdf2_hmac(
         "sha256",
         password.encode("utf-8"),
@@ -14,14 +14,24 @@ def hash_password(password: str, salt: bytes) -> bytes:
     )
 
 
-def login(username: str, password: str) -> bool:
-    """Validate user credentials securely."""
+def login(username: str, password: str) -> dict:
+    """Validate input and authenticate user."""
+
+    # 1. Validate input types
     if not isinstance(username, str) or not isinstance(password, str):
-        return False
+        return {
+            "success": False,
+            "message": "Invalid input type",
+        }
 
-    if not username or not password:
-        return False
+    # 2. Validate required fields
+    if not username.strip() or not password.strip():
+        return {
+            "success": False,
+            "message": "Username and password are required",
+        }
 
+    # 3. Load credentials from environment
     expected_username = os.getenv("APP_USERNAME")
     password_hash = os.getenv("APP_PASSWORD_HASH")
     password_salt = os.getenv("APP_PASSWORD_SALT")
@@ -35,9 +45,20 @@ def login(username: str, password: str) -> bool:
     except ValueError as exc:
         raise RuntimeError("Invalid authentication configuration") from exc
 
+    # 4. Verify credentials
     candidate_hash = hash_password(password, salt)
 
-    return (
-        hmac.compare_digest(username, expected_username)
-        & hmac.compare_digest(candidate_hash, stored_hash)
-    )
+    username_valid = hmac.compare_digest(username, expected_username)
+    password_valid = hmac.compare_digest(candidate_hash, stored_hash)
+
+    if not (username_valid and password_valid):
+        return {
+            "success": False,
+            "message": "Invalid credentials",
+        }
+
+    # 5. Authentication successful
+    return {
+        "success": True,
+        "message": "Login successful",
+    }
