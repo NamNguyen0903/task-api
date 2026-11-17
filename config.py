@@ -1,1 +1,1 @@
-MAX_TASKS = 20
+MAX_TASKS = 50
