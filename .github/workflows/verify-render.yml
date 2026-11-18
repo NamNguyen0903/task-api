@@ -38,3 +38,37 @@ jobs:
             id: (.deploy.id // .id),
             status: (.deploy.status // .status)
           }]' deploys.json
+
+      - name: Verify current live deployment
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+
+          GOOD_DEPLOY_ID=$(jq -r '
+            [.[] | select(.deploy.status == "live")]
+            | first
+            | .deploy.id // empty
+          ' deploys.json)
+
+          if [ -z "$GOOD_DEPLOY_ID" ]; then
+            echo "::error::No live deployment found"
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$GOOD_DEPLOY_ID" \
+            -o live-deploy.json
+
+          jq '{
+            id,
+            status,
+            image: .image.ref
+          }' live-deploy.json
+
+          jq -e '.status == "live"' live-deploy.json > /dev/null
+
+          echo "GOOD_DEPLOY_ID=$GOOD_DEPLOY_ID" >> "$GITHUB_ENV"
+          echo "Live deployment verified"
