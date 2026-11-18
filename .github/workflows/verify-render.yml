@@ -1,0 +1,40 @@
+
+name: Verify Render API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-render:
+    name: Check Render Deployments
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Read Render deployments
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RENDER_API_KEY" ] || [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "Missing Render API configuration"
+            exit 1
+          fi
+
+          echo "Checking Render API..."
+
+          curl --fail --silent --show-error \
+            --retry 3 \
+            --retry-delay 2 \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Accept: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=5" \
+            -o deploys.json
+
+          echo "Recent deployments:"
+
+          jq '[.[] | {
+            id: (.deploy.id // .id),
+            status: (.deploy.status // .status)
+          }]' deploys.json
