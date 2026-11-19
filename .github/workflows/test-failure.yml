@@ -1,0 +1,66 @@
+
+name: Test Deployment Failure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulate-failure:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Simulate failed deployment
+        id: simulated_deploy
+        continue-on-error: true
+        run: |
+          echo "Simulating deployment failure"
+          exit 1
+
+      - name: Evaluate rollback decision
+        if: ${{ steps.simulated_deploy.outcome == 'failure' }}
+        run: |
+          python - <<'PY'
+          from rollback.decision import (
+              decide_rollback,
+              RollbackDecision,
+          )
+
+          deployments = [
+              {
+                  "deploy": {
+                      "id": "dep-good123",
+                      "status": "deactivated",
+                  }
+              },
+              {
+                  "deploy": {
+                      "id": "dep-new456",
+                      "status": "live",
+                  }
+              },
+          ]
+
+          result = decide_rollback(
+              good_deploy_id="dep-good123",
+              new_deploy_id="dep-new456",
+              deployments=deployments,
+          )
+
+          print(f"Rollback decision: {result.value}")
+
+          assert result == RollbackDecision.ROLLBACK_CANDIDATE
+
+          print("Failure path test passed")
+          print("DRY RUN: No actual rollback")
+          PY
