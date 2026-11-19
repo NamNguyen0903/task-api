@@ -109,6 +109,14 @@ jobs:
 
     steps:
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Save current live deployment
         id: baseline
         env:
@@ -308,7 +316,8 @@ jobs:
           echo "::error::Health check failed"
           exit 1
 
-      - name: Evaluate rollback decision
+      
+      - name: Evaluate Python rollback decision
         if: ${{ failure() && steps.trigger.outputs.new_deploy_id != '' }}
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -318,38 +327,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Checking deployment state before rollback..."
-
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=20" \
             -o deploys.json
 
-          LIVE_DEPLOY_ID=$(jq -r '
-            [.[] | select((.deploy.status // .status) == "live")
-              | (.deploy.id // .id)]
-            | if length == 1 then .[0] else empty end
-          ' deploys.json)
+          python - <<'PY'
+          import json
+          import os
 
-          echo "Previous good: $GOOD_DEPLOY_ID"
-          echo "New deployment: $NEW_DEPLOY_ID"
-          echo "Currently live: $LIVE_DEPLOY_ID"
+          from rollback.decision import decide_rollback
 
-          if [ -z "$LIVE_DEPLOY_ID" ]; then
-            echo "::warning::Cannot identify a unique live deployment"
-            echo "Manual investigation required"
+          with open("deploys.json", encoding="utf-8") as f:
+              deployments = json.load(f)
 
-          elif [ "$LIVE_DEPLOY_ID" = "$GOOD_DEPLOY_ID" ]; then
-            echo "Previous good deployment is still live"
-            echo "No additional rollback required"
+          decision = decide_rollback(
+              good_deploy_id=os.environ["GOOD_DEPLOY_ID"],
+              new_deploy_id=os.environ["NEW_DEPLOY_ID"],
+              deployments=deployments,
+          )
 
-          elif [ "$LIVE_DEPLOY_ID" = "$NEW_DEPLOY_ID" ]; then
-            echo "::warning::New deployment is live but verification failed"
-            echo "Rollback candidate: $GOOD_DEPLOY_ID"
-            echo "DRY RUN: No rollback executed"
-
-          else
-            echo "::warning::Unexpected live deployment"
-            echo "Manual investigation required"
-          fi
-
+          print(f"Rollback decision: {decision.value}")
+          print("DRY RUN: No rollback executed")
+          PY
