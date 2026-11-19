@@ -258,3 +258,52 @@ jobs:
           echo "::error::Deployment monitoring timed out"
           exit 1
 
+
+      - name: Verify deployed application
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+          NEW_DEPLOY_ID: ${{ steps.trigger.outputs.new_deploy_id }}
+          EXPECTED_IMAGE: ghcr.io/namnguyen0903/task-api:sha-${{ github.sha }}
+          HEALTH_URL: https://task-api-sha.onrender.com/health
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$NEW_DEPLOY_ID" \
+            -o deployment.json
+
+          STATUS=$(jq -r '.status // empty' deployment.json)
+          ACTUAL_IMAGE=$(jq -r '.image.ref // empty' deployment.json)
+
+          echo "Deployment status: $STATUS"
+          echo "Expected image: $EXPECTED_IMAGE"
+          echo "Actual image: $ACTUAL_IMAGE"
+
+          if [ "$STATUS" != "live" ]; then
+            echo "::error::Deployment is not live"
+            exit 1
+          fi
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "::error::Docker image does not match commit SHA"
+            exit 1
+          fi
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              --max-time 20 \
+              "$HEALTH_URL" \
+              -o health.json &&
+              jq -e '.status == "healthy"' health.json > /dev/null; then
+              echo "Health check passed"
+              exit 0
+            fi
+
+            echo "Health check attempt $attempt failed"
+            sleep 10
+          done
+
+          echo "::error::Health check failed"
+          exit 1
