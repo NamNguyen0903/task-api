@@ -150,22 +150,55 @@ jobs:
 
           echo "GOOD_DEPLOY_ID=$GOOD_DEPLOY_ID"
     
+      
       - name: Trigger Render deployment
+        id: trigger
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
           IMAGE: ghcr.io/namnguyen0903/task-api:sha-${{ github.sha }}
         run: |
+          set -euo pipefail
+
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Missing RENDER_DEPLOY_HOOK_URL secret"
+            echo "::error::Missing Render Deploy Hook"
             exit 1
           fi
-
-          echo "Requesting Render deployment for image tag:"
-          echo "$IMAGE"
 
           curl --fail --silent --show-error \
             --get \
             --data-urlencode "imgURL=$IMAGE" \
-            "$RENDER_DEPLOY_HOOK_URL"
+            "$RENDER_DEPLOY_HOOK_URL" \
+            -o response.json
 
-          echo "Render deployment requested"
+          NEW_DEPLOY_ID=$(jq -r '.deploy.id // empty' response.json)
+
+          if [ -z "$NEW_DEPLOY_ID" ]; then
+            echo "::error::Render did not return a Deploy ID"
+            exit 1
+          fi
+
+          echo "new_deploy_id=$NEW_DEPLOY_ID" >> "$GITHUB_OUTPUT"
+          echo "NEW_DEPLOY_ID=$NEW_DEPLOY_ID"
+
+      - name: Verify deployment IDs
+        env:
+          GOOD_DEPLOY_ID: ${{ steps.baseline.outputs.good_deploy_id }}
+          NEW_DEPLOY_ID: ${{ steps.trigger.outputs.new_deploy_id }}
+        run: |
+          set -euo pipefail
+
+          echo "GOOD_DEPLOY_ID=$GOOD_DEPLOY_ID"
+          echo "NEW_DEPLOY_ID=$NEW_DEPLOY_ID"
+
+          if [ -z "$GOOD_DEPLOY_ID" ] || [ -z "$NEW_DEPLOY_ID" ]; then
+            echo "::error::Missing deployment ID"
+            exit 1
+          fi
+
+          if [ "$GOOD_DEPLOY_ID" = "$NEW_DEPLOY_ID" ]; then
+            echo "::error::New deployment ID matches baseline"
+            exit 1
+          fi
+
+          echo "Deployment IDs verified"
+
