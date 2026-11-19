@@ -105,6 +105,51 @@ jobs:
     environment: staging
 
     steps:
+
+      - name: Save current live deployment
+        id: baseline
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RENDER_API_KEY" ] || [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "::error::Missing Render API configuration"
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=20" \
+            -o deploys.json
+
+          GOOD_DEPLOY_ID=$(jq -r '
+            [.[] | select((.deploy.status // .status) == "live")
+              | (.deploy.id // .id)]
+            | if length == 1 then .[0] else empty end
+          ' deploys.json)
+
+          if [ -z "$GOOD_DEPLOY_ID" ]; then
+            echo "::error::Expected exactly one live deployment"
+            exit 1
+          fi
+
+          echo "good_deploy_id=$GOOD_DEPLOY_ID" >> "$GITHUB_OUTPUT"
+          echo "Saved baseline deployment: $GOOD_DEPLOY_ID"
+
+      
+      - name: Verify saved deployment ID
+        env:
+          GOOD_DEPLOY_ID: ${{ steps.baseline.outputs.good_deploy_id }}
+        run: |
+          if [ -z "$GOOD_DEPLOY_ID" ]; then
+            echo "::error::GOOD_DEPLOY_ID is empty"
+            exit 1
+          fi
+
+          echo "GOOD_DEPLOY_ID=$GOOD_DEPLOY_ID"
+    
       - name: Trigger Render deployment
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
